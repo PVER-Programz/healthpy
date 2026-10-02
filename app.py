@@ -1,6 +1,5 @@
 import json
 import os
-import random
 import sqlite3
 import time
 from datetime import datetime
@@ -35,7 +34,7 @@ def init_db():
     with db() as c:
         c.executescript("""
         CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS patients (id INTEGER PRIMARY KEY AUTOINCREMENT, patient_name TEXT NOT NULL, age INTEGER NOT NULL, room_number TEXT NOT NULL, diagnosis TEXT DEFAULT 'General Observation', heart_rate REAL DEFAULT 75, spo2 REAL DEFAULT 98, temperature REAL DEFAULT 36.8, respiratory_rate REAL DEFAULT 16, blood_pressure TEXT DEFAULT '120/80', movement_state TEXT DEFAULT 'Resting', risk_score REAL DEFAULT 0, status TEXT DEFAULT 'Stable', user_id INTEGER, updated_at TEXT);
+        CREATE TABLE IF NOT EXISTS patients (id INTEGER PRIMARY KEY AUTOINCREMENT, patient_name TEXT NOT NULL, age INTEGER NOT NULL, room_number TEXT NOT NULL, diagnosis TEXT DEFAULT 'General Observation', heart_rate REAL, spo2 REAL, temperature REAL, respiratory_rate REAL, blood_pressure TEXT, movement_state TEXT, risk_score REAL, status TEXT, user_id INTEGER, updated_at TEXT);
         CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id INTEGER NOT NULL, patient_name TEXT NOT NULL, alert_type TEXT NOT NULL, severity TEXT NOT NULL, message TEXT NOT NULL, timestamp TEXT NOT NULL);
         """)
 
@@ -147,10 +146,11 @@ def register():
     name,email,password,role=d.get("name"),d.get("email"),d.get("password"),d.get("role")
     role={"student":"patient","proctor":"caretaker"}.get(role,role)
     if not all((name,email,password)) or role not in ("patient","caretaker"): return jsonify(message="Name, email, password and a valid role are required"),400
+    if role=="patient" and not all((d.get("age"),d.get("room_number"),d.get("diagnosis"))): return jsonify(message="Age, room number and diagnosis are required for patient accounts"),400
     try:
         with db() as c:
             cur=c.execute("INSERT INTO users(name,email,password,role) VALUES(?,?,?,?)",(name,email,generate_password_hash(password),role)); uid=cur.lastrowid
-            if role=="patient": c.execute("INSERT INTO patients(patient_name,age,room_number,diagnosis,user_id,updated_at) VALUES(?,?,?,?,?,?)",(name,int(d.get("age") or random.randint(30,79)),d.get("room_number") or f"ICU-{random.randint(101,110)}",d.get("diagnosis") or "Post-operative Recovery",uid,datetime.now().isoformat()))
+            if role=="patient": c.execute("INSERT INTO patients(patient_name,age,room_number,diagnosis,heart_rate,spo2,temperature,respiratory_rate,blood_pressure,movement_state,risk_score,status,user_id,updated_at) VALUES(?,?,?,?,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,?,?)",(name,int(d["age"]),d["room_number"],d["diagnosis"],uid,datetime.now().isoformat()))
     except sqlite3.IntegrityError: return jsonify(message="Account already exists"),400
     with db() as c: u=c.execute("SELECT * FROM users WHERE id=?",(uid,)).fetchone()
     return jsonify(user_payload(u)),201
@@ -176,7 +176,7 @@ def patient_collection():
         return jsonify([patient_dict(x) for x in rows])
     d=request.get_json() or {}
     with db() as c:
-        cur=c.execute("INSERT INTO patients(patient_name,age,room_number,diagnosis,updated_at) VALUES(?,?,?,?,?)",(d.get("patient_name"),d.get("age"),d.get("room_number"),d.get("diagnosis","General Observation"),datetime.now().isoformat())); row=c.execute("SELECT * FROM patients WHERE id=?",(cur.lastrowid,)).fetchone()
+        cur=c.execute("INSERT INTO patients(patient_name,age,room_number,diagnosis,heart_rate,spo2,temperature,respiratory_rate,blood_pressure,movement_state,risk_score,status,updated_at) VALUES(?,?,?,?,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,?)",(d.get("patient_name"),d.get("age"),d.get("room_number"),d.get("diagnosis","General Observation"),datetime.now().isoformat())); row=c.execute("SELECT * FROM patients WHERE id=?",(cur.lastrowid,)).fetchone()
     return jsonify(patient_dict(row)),201
 
 
@@ -223,14 +223,6 @@ def icu_monitor(room):
     return jsonify(room=room,monitoringActive=n>0,patientCount=n,systemHealth="Optimal",videoFeedStatus="Connected",vitalsTelemetry="Active")
 
 
-@app.post("/simulate")
-def simulate():
-    d=request.get_json(silent=True) or {}; room,mode=d.get("room"),d.get("mode")
-    if not room or not mode: return jsonify(error="Room and mode are required"),400
-    socketio.emit("set-simulation-mode",{"room":room,"mode":mode})
-    return jsonify(message=f"Simulation mode {mode} sent to room {room}")
-
-
 @app.post("/sensor")
 def sensor():
     room=request.args.get("room")
@@ -249,9 +241,12 @@ def patient_join(data):
     name=data.get("name") or "Unknown Patient"; pid=data.get("patientId")
     with db() as c:
         row=c.execute("SELECT * FROM patients WHERE id=?",(pid,)).fetchone() if pid and str(pid).isdigit() else c.execute("SELECT * FROM patients WHERE patient_name=? ORDER BY updated_at DESC LIMIT 1",(name,)).fetchone()
-    p=patient_dict(row) if row else {"_id":pid or f"mock_pat_{request.sid}","patient_name":name,"age":data.get("age",65),"room_number":data.get("roomNumber","ICU-102"),"diagnosis":data.get("diagnosis","Post-operative Observation"),"heart_rate":"-","spo2":"-","temperature":"-","respiratory_rate":"-","blood_pressure":"-","movement_state":"Resting","risk_score":0,"status":"Stable"}
+    if not row:
+        emit("patient-error",{"message":"No registered patient record was found. Sign in with a registered patient account."})
+        return
+    p=patient_dict(row)
     sid=request.sid; socket_patient[sid]=p["_id"]
-    patients_live[sid]={"patientId":p["_id"],"name":p["patient_name"],"age":p["age"],"roomNumber":p["room_number"],"diagnosis":p["diagnosis"],"heartRate":p["heart_rate"],"spo2":p["spo2"],"temperature":p["temperature"],"respiratoryRate":p["respiratory_rate"],"bloodPressure":p["blood_pressure"],"movementState":p["movement_state"],"riskScore":p["risk_score"],"status":p["status"],"bedOccupancy":True,"headPosition":"Normal","eyesClosedSec":0,"painScore":0,"asymmetryScore":0,"marScore":0,"deliriumScore":0,"lastAlertTime":{},"videoFrame":None,"timeline":[{"time":datetime.now().strftime("%H:%M:%S"),"event":"ICU Monitoring Session Initiated","severity":"Stable"}]}
+    patients_live[sid]={"patientId":p["_id"],"name":p["patient_name"],"age":p["age"],"roomNumber":p["room_number"],"diagnosis":p["diagnosis"],"heartRate":None,"spo2":None,"temperature":None,"respiratoryRate":None,"bloodPressure":None,"movementState":"Unknown","riskScore":0,"status":"Stable","bedOccupancy":None,"headPosition":None,"eyesClosedSec":0,"painScore":0,"asymmetryScore":0,"marScore":0,"deliriumScore":0,"lastAlertTime":{},"videoFrame":False,"cameraStatus":"Starting camera…","timeline":[{"time":datetime.now().strftime("%H:%M:%S"),"event":"ICU Monitoring Session Initiated","severity":"Stable"}]}
     broadcast_patients()
 
 
@@ -286,7 +281,7 @@ def update_patient(data):
             socketio.emit("emergency-notification",{"patientId":pid,"patientName":p["name"],"roomNumber":p["roomNumber"],"alertType":typ,"severity":severity,"message":msg,"timestamp":stamp})
     pid=p["patientId"]
     if str(pid).isdigit():
-        with db() as c: c.execute("UPDATE patients SET heart_rate=?,spo2=?,temperature=?,respiratory_rate=?,blood_pressure=?,movement_state=?,risk_score=?,status=?,updated_at=? WHERE id=?",(p["heartRate"],p["spo2"],p["temperature"],p["respiratoryRate"],p["bloodPressure"],p["movementState"],p["riskScore"],p["status"],datetime.now().isoformat(),int(pid)))
+        with db() as c: c.execute("UPDATE patients SET heart_rate=COALESCE(?,heart_rate),spo2=COALESCE(?,spo2),temperature=COALESCE(?,temperature),respiratory_rate=COALESCE(?,respiratory_rate),blood_pressure=COALESCE(?,blood_pressure),movement_state=COALESCE(?,movement_state),risk_score=?,status=?,updated_at=? WHERE id=?",(p["heartRate"],p["spo2"],p["temperature"],p["respiratoryRate"],p["bloodPressure"],p["movementState"],p["riskScore"],p["status"],datetime.now().isoformat(),int(pid)))
     broadcast_patients()
 
 
@@ -296,6 +291,15 @@ def sensor_to_patient(data):
         if p.get("roomNumber")==data.get("room"):
             packet={"heartRate":data.get("heart_rate"),"spo2":data.get("spO2"),"temperature":data.get("temp"),"respiratoryRate":data.get("resp_rate"),"bloodPressure":data.get("ABP")}
             socketio.emit("sensor-data",packet,to=sid)
+
+
+@socketio.on("camera-status")
+def update_camera_status(data):
+    p=patients_live.get(request.sid)
+    if not p: return
+    p["cameraStatus"]=data.get("status","Camera status unavailable")
+    p["videoFrame"]=bool(data.get("ready"))
+    broadcast_patients()
 
 
 @socketio.on("request-video")
@@ -312,4 +316,4 @@ def disconnect():
 
 
 init_db()
-if __name__ == "__main__": socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=True)
+if __name__ == "__main__": socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=True, allow_unsafe_werkzeug=True)
