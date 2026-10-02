@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vigilance ICU · Clinical Telemetry</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+</head>
+<body>
+{% if not mode %}
+<main class="auth-shell"><section class="auth-card"><div class="brandmark">✚</div><h1>Vigilance ICU</h1><p class="muted center">Clinical Telemetry &amp; Patient Monitoring Portal</p>
+  <div class="tabs"><button class="tab active" data-tab="login">Sign In</button><button class="tab" data-tab="register">Register</button></div>
+  <form id="auth-form"><div id="register-fields" class="hidden">
+    <label>Full Name<input name="name" autocomplete="name"></label><label>Account Role<select name="role"><option value="patient">Patient (Monitored Room Feed)</option><option value="caretaker">ICU Caretaker (Monitoring Dashboard)</option></select></label>
+    <div id="patient-fields" class="form-row"><label>Age<input name="age" type="number" placeholder="65"></label><label>Room #<input name="room_number" placeholder="ICU-104"></label></div><label id="diagnosis-field">Primary Diagnosis<input name="diagnosis" placeholder="Cardiorespiratory Monitoring"></label>
+  </div><label>Email Address<input name="email" type="email" required autocomplete="email"></label><label>Secure Password<input name="password" type="password" required autocomplete="current-password"></label><p id="auth-error" class="error"></p><button class="primary full" id="auth-submit">Access ICU Portal</button></form>
+</section></main>
+{% else %}
+<header class="topbar"><a class="brand" href="/">✚ <span>Vigilance ICU</span></a><span class="muted">{% if mode=='patient' %}Patient telemetry portal{% else %}Caretaker control dashboard{% endif %}</span><div class="top-actions"><span>{{ user.name }}</span><button class="button subtle" id="logout">Sign out</button></div></header>
+{% if mode=='patient' %}
+<main class="patient-layout" id="patient-app" data-user='{{ user|tojson }}'>
+  <section class="page-heading"><div><div class="eyebrow">PATIENT MONITORING SESSION</div><h1>{{ user.patientInfo.patient_name }}</h1><p class="muted">Room {{ user.patientInfo.room_number }} · Age {{ user.patientInfo.age }} · {{ user.patientInfo.diagnosis }}</p></div><div class="patient-status-wrap"><span class="risk-label">RISK INDEX <b id="patient-risk">0/100</b></span><span class="badge stable" id="patient-status">Stable</span></div></section>
+  <div class="patient-grid">
+    <section class="panel camera-panel"><div class="panel-head"><div><div class="eyebrow">COMPUTER VISION</div><h2>Bedside camera</h2></div><span class="live-dot" id="camera-status">Starting camera</span></div><div class="video-box"><video id="local-video" autoplay muted playsinline></video><canvas id="cv-canvas"></canvas><div class="camera-offline hidden" id="camera-offline">Camera unavailable<br><small>Allow camera access or use simulation mode</small></div></div><div class="cv-stats"><div><small>Bed presence</small><b id="bed-state">Waiting</b></div><div><small>Movement</small><b id="movement-state">Resting</b></div><div><small>Eye closure</small><b><span id="eyes-state">0</span> sec</b></div></div></section>
+    <section class="panel vitals-panel"><div class="panel-head"><div><div class="eyebrow">LIVE TELEMETRY</div><h2>Vital signs</h2></div><span class="muted" id="sensor-stamp">Waiting for sensor data</span></div><div class="vital-cards"><div class="vital-card red"><small>♥ HEART RATE</small><strong id="v-heart">--</strong><span>bpm</span><canvas id="hr-wave"></canvas></div><div class="vital-card green"><small>◉ SpO₂</small><strong id="v-spo2">--</strong><span>%</span><canvas id="spo-wave"></canvas></div><div class="vital-card orange"><small>TEMPERATURE</small><strong id="v-temp">--</strong><span>°C</span></div><div class="vital-card blue"><small>RESPIRATORY RATE</small><strong id="v-resp">--</strong><span>rpm</span></div><div class="vital-card purple"><small>BLOOD PRESSURE</small><strong id="v-bp">--</strong><span>mmHg</span></div></div>
+  <div class="panel simulation"><div class="panel-head"><div><div class="eyebrow">CLINICAL SIMULATION CONSOLE</div><h2>Simulation profile</h2></div></div><p class="muted">Choose a profile to simulate patient telemetry and CV conditions.</p><div class="sim-buttons"><button data-mode="Stable">Stable</button><button data-mode="Tachycardia">Tachycardia</button><button data-mode="Hypoxia">Hypoxia</button><button data-mode="Collapse">Collapse</button><button data-mode="Restless">Restlessness</button><button data-mode="Sleep">Sleep</button><button data-mode="OutOfBed">Bed exit</button></div><div class="sim-current">Current profile: <b id="sim-current">Stable</b></div></div></section>
+  </div>
+</main>
+{% else %}
+<main class="caretaker-layout" id="caretaker-app">
+  <aside class="room-sidebar"><div class="panel-head"><div><div class="eyebrow">ICU WARD</div><h2>Patient rooms</h2></div><span class="count" id="patient-count">0</span></div><div id="room-list" class="room-list"><p class="muted">Waiting for active patient feeds…</p></div><div class="sidebar-bottom"><button class="button subtle full" id="risk-settings">⚙ Risk score settings</button></div></aside>
+  <section class="monitor-main"><div id="empty-state" class="empty-state"><div class="empty-icon">⌂</div><h2>Clinical monitor awaiting signals</h2><p>Select a patient room to view live clinical telemetry.</p></div><div id="monitor-view" class="hidden"><section class="panel patient-summary"><div><span class="eyebrow" id="active-room">ROOM</span><h1 id="active-name">Patient</h1><p class="muted" id="active-diagnosis"></p></div><div class="summary-stats"><div><small>RISK INDEX</small><strong id="active-risk">0/100</strong></div><div><small>STATUS</small><b id="active-status" class="badge stable">Stable</b></div><div><small>BED PRESENCE</small><b id="active-bed">IN BED</b></div></div></section>
+  <div class="monitor-grid"><div class="monitor-left"><section class="panel video-panel"><div class="panel-head"><div><div class="eyebrow">LIVE CCTV LINK</div><h2>Patient camera</h2></div><span class="muted" id="video-state">Feed disconnected</span></div><video id="remote-video" autoplay playsinline></video></section><section class="panel"><div class="eyebrow">RISK BREAKDOWN COMPONENTS</div><div class="score-list" id="score-breakdown"></div></section></div>
+  <div class="monitor-center"><section class="panel chart-panel"><div class="panel-head"><h3>♥ ECG Heart rate</h3><strong id="chart-hr">-- bpm</strong></div><canvas id="caretaker-hr"></canvas></section><section class="panel chart-panel"><div class="panel-head"><h3>◉ Plethysmogram SpO₂</h3><strong id="chart-spo">-- %</strong></div><canvas id="caretaker-spo"></canvas></section><section class="panel mini-vitals"><div><small>TEMP</small><b id="active-temp">-- °C</b></div><div><small>RESP RATE</small><b id="active-resp">-- rpm</b></div><div><small>BLOOD PRESS</small><b id="active-bp">--</b></div></section></div>
+  <section class="panel timeline-panel"><div class="panel-head"><div><div class="eyebrow">EVENT HISTORY</div><h2>Clinical timeline</h2></div><button class="button subtle" id="refresh-alerts">Alerts</button></div><div class="timeline" id="timeline"><p class="muted center">No clinical events recorded.</p></div></section></div></div></section>
+</main>
+<div class="toast-stack" id="toast-stack"></div>
+<dialog id="settings-dialog"><form method="dialog" class="settings-card"><div class="panel-head"><div><div class="eyebrow">RISK ENGINE</div><h2>Risk score customization</h2></div><button class="close" value="cancel">×</button></div><p class="muted">Edit the complete settings object used by the live risk scoring engine.</p><textarea id="settings-json" spellcheck="false"></textarea><p id="settings-error" class="error"></p><div class="dialog-actions"><button class="button subtle" value="cancel">Cancel</button><button class="primary" id="save-settings" type="button">Save changes</button></div></form></dialog>
+<dialog id="alerts-dialog"><div class="settings-card"><div class="panel-head"><h2>Clinical alerts</h2><button class="close" onclick="document.getElementById('alerts-dialog').close()">×</button></div><div id="alerts-list" class="timeline"></div></div></dialog>
+{% endif %}
+<script>window.APP_MODE={{ mode|tojson }};window.APP_USER={{ user|tojson }};</script>
+{% endif %}
+<script src="{{ url_for('static', filename='js/script.js') }}?v=2"></script>
+</body></html>
