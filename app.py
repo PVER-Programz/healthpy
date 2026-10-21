@@ -47,6 +47,19 @@ def patient_dict(row):
     return p
 
 
+def ice_config():
+    """Build browser WebRTC settings from TURN service environment variables."""
+    urls = [url.strip() for url in os.environ.get("TURN_URLS", "").split(",") if url.strip()]
+    username = os.environ.get("TURN_USERNAME")
+    credential = os.environ.get("TURN_CREDENTIAL")
+    if not urls or not username or not credential:
+        return {"iceServers": [], "iceTransportPolicy": "relay", "turnConfigured": False}
+    server = {"urls": urls}
+    server["username"] = username
+    server["credential"] = credential
+    return {"iceServers": [server], "iceTransportPolicy": "relay", "turnConfigured": True}
+
+
 def user_payload(row):
     u = dict(row)
     u.pop("password", None)
@@ -132,12 +145,12 @@ def portal(): return redirect(url_for("patient_page" if current_user()["role"]==
 
 @app.route("/patient")
 @auth_required("patient")
-def patient_page(): return render_template("index.html", mode="patient", user=user_payload(current_user()))
+def patient_page(): return render_template("index.html", mode="patient", user=user_payload(current_user()), ice_config=ice_config())
 
 
 @app.route("/caretaker")
 @auth_required("caretaker")
-def caretaker_page(): return render_template("index.html", mode="caretaker", user=user_payload(current_user()))
+def caretaker_page(): return render_template("index.html", mode="caretaker", user=user_payload(current_user()), ice_config=ice_config())
 
 
 @app.post("/api/auth/register")

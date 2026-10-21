@@ -40,7 +40,7 @@
 <dialog id="settings-dialog"><form method="dialog" class="settings-card"><div class="panel-head"><div><div class="eyebrow">RISK ENGINE</div><h2>Risk score customization</h2></div><button class="close" value="cancel">×</button></div><p class="muted">Edit the complete settings object used by the live risk scoring engine.</p><textarea id="settings-json" spellcheck="false"></textarea><p id="settings-error" class="error"></p><div class="dialog-actions"><button class="button subtle" value="cancel">Cancel</button><button class="primary" id="save-settings" type="button">Save changes</button></div></form></dialog>
 <dialog id="alerts-dialog"><div class="settings-card"><div class="panel-head"><h2>Clinical alerts</h2><button class="close" onclick="document.getElementById('alerts-dialog').close()">×</button></div><div id="alerts-list" class="timeline"></div></div></dialog>
 {% endif %}
-<script>window.APP_MODE={{ mode|tojson }};window.APP_USER={{ user|tojson }};</script>
+<script>window.APP_MODE={{ mode|tojson }};window.APP_USER={{ user|tojson }};window.ICE_CONFIG={{ ice_config|tojson }};</script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/script.js') }}?v=5"></script>
+<script src="{{ url_for('static', filename='js/script.js') }}?v=6"></script>
 </body></html>
